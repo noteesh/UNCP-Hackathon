@@ -40,7 +40,7 @@ export function Landing({ onNavigate }: LandingProps) {
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.3 }}
         >
-          Automated Universal Recovery Assessment
+          Automated Undereye Recovery Assessment
         </motion.h1>
         <motion.p
           className="text-xl text-aura-muted mb-10"
