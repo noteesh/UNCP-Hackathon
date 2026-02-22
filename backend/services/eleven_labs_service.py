@@ -56,7 +56,7 @@ class SpeechRequest(BaseModel):
     text: str
     voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Default: Rachel (Nurse-like)
 
-@router.post("/api/v1/voice/generate")
+@router.post("/api/voice/generate")
 async def generate_voice(request: SpeechRequest):
     """
     Receives text (from Gemini reasoning), converts to speech via ElevenLabs,
@@ -84,7 +84,7 @@ async def generate_voice(request: SpeechRequest):
         raise HTTPException(status_code=500, detail="Failed to synthesize speech")
 
 # Example of how you'd trigger this from your Gemini logic
-@router.post("/api/v1/recovery/analyze")
+@router.post("/api/recovery/analyze")
 async def analyze_and_speak(test_data: dict):
     # 1. Process biomarkers (logic here)
     # 2. Get clinical reasoning from Gemini
@@ -105,7 +105,7 @@ INSTRUCTION_SET = {
     "complete": "Test complete. Please wait a moment while we analyze your physiological readiness."
 }
 
-@router.get("/api/v1/voice/instructions")
+@router.get("/api/voice/instructions")
 async def get_instructions(type: str = Query(..., description="The key of the instruction set to read")):
     """
     Returns high-quality audio instructions based on the stage of the test.

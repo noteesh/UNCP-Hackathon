@@ -37,6 +37,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from dotenv import load_dotenv
 
@@ -70,6 +71,7 @@ METRIC_KEYS = [
 
 _client: AsyncIOMotorClient | None = None
 _db: AsyncIOMotorDatabase | None = None
+router = APIRouter()
 
 
 async def connect() -> None:
@@ -378,6 +380,64 @@ async def update_session_audit(
             "solana_explorer_url": solana_explorer_url,
         }},
     )
+
+
+# ---------------------------------------------------------------------------
+# API routes (mounted by main.py)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/patients")
+async def list_patients_route():
+    return await list_patients()
+
+
+@router.post("/api/patients")
+async def create_patient_route(body: dict):
+    return await create_patient(
+        name=body["name"],
+        age=body.get("age", 0),
+        surgery_type=body.get("surgery_type", ""),
+        surgery_date=body.get("surgery_date", ""),
+        medications=body.get("medications", []),
+        conditions=body.get("conditions", []),
+        assigned_physician_id=body.get("assigned_physician_id"),
+    )
+
+
+@router.get("/api/patients/{patient_id}")
+async def get_patient_route(patient_id: str):
+    patient = await get_patient(patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return patient
+
+
+@router.post("/api/session")
+async def create_session_route(body: dict):
+    if "time_series" not in body or not isinstance(body["time_series"], list):
+        raise HTTPException(
+            status_code=422,
+            detail="'time_series' must be a non-empty list of metric readings.",
+        )
+    return await create_session(
+        patient_id=body["patient_id"],
+        time_series=body["time_series"],
+        aura_score=body.get("aura_score"),
+        gemini_summary=body.get("gemini_summary"),
+        solana_tx_hash=body.get("solana_tx_hash"),
+        solana_explorer_url=body.get("solana_explorer_url"),
+    )
+
+
+@router.get("/api/session/{patient_id}")
+async def get_sessions_route(patient_id: str):
+    return await get_sessions_for_patient(patient_id)
+
+
+@router.get("/api/longitudinal/{patient_id}")
+async def get_longitudinal_route(patient_id: str):
+    sessions = await get_sessions_for_patient(patient_id)
+    return build_longitudinal_summary(sessions)
 
 
 # ---------------------------------------------------------------------------
