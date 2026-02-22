@@ -200,7 +200,7 @@ export function ResultsScreen() {
             Save Report
           </Button>
           <Button
-            onClick={() => navigate("/welcome")}
+            onClick={() => navigate("/dashboard")}
             variant="outline"
             className="h-12 border border-white/10 bg-white/5 text-white hover:bg-white/10 text-sm rounded-xl"
           >

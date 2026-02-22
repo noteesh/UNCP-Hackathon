@@ -1,7 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import { AuthScreen } from "./screens/auth-screen";
 import { AppLayout } from "./components/app-layout";
-import { WelcomeScreen } from "./screens/welcome-screen";
 import { InstructionsScreen } from "./screens/instructions-screen";
 import { EyeTestScreen } from "./screens/eye-test-screen";
 import { VoiceTestScreen } from "./screens/voice-test-screen";
@@ -19,7 +18,6 @@ export const router = createBrowserRouter([
     Component: AppLayout,
     children: [
       { index: true, Component: AuthScreen },
-      { path: "welcome", Component: WelcomeScreen },
       { path: "dashboard", Component: DashboardScreen },
       { path: "baseline", Component: BaselineScreen },
       { path: "post-op", Component: PostOpScreen },
