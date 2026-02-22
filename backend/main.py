@@ -29,7 +29,7 @@ app.add_middleware(
         "http://localhost:5173",   # Vite dev server
         "http://localhost:4173",   # Vite preview
         # Add your DigitalOcean frontend URL here once deployed, e.g.:
-        # "https://aura.your-app.ondigitalocean.app",
+        "https://aura-arf5n.ondigitalocean.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
