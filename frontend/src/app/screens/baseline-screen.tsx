@@ -3,6 +3,10 @@ import { useNavigate } from "react-router";
 import { Target } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { VoiceAssistantButton } from "../components/voice-assistant-button";
+
+const BASELINE_TRANSCRIPT =
+  "Pre-op baseline. Establish your baseline before surgery. You will follow the dot with your eyes and complete a short voice check. The test takes a few minutes. Keep your head still and follow the on-screen instructions.";
 
 export function BaselineScreen() {
   const navigate = useNavigate();
@@ -32,6 +36,7 @@ export function BaselineScreen() {
           </Button>
         </Card>
       </div>
+      <VoiceAssistantButton instructionType="baseline_start" transcript={BASELINE_TRANSCRIPT} />
     </div>
   );
 }

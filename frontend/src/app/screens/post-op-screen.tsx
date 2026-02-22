@@ -3,6 +3,10 @@ import { useNavigate } from "react-router";
 import { Stethoscope } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { VoiceAssistantButton } from "../components/voice-assistant-button";
+
+const POST_OP_TRANSCRIPT =
+  "Post-op test. Run a post-operative assessment to compare against your baseline. Same short eye-tracking and voice test—results appear on your dashboard. Complete the test when you're ready. Your results will be compared to your pre-op baseline.";
 
 export function PostOpScreen() {
   const navigate = useNavigate();
@@ -32,6 +36,7 @@ export function PostOpScreen() {
           </Button>
         </Card>
       </div>
+      <VoiceAssistantButton instructionType="post_op_start" transcript={POST_OP_TRANSCRIPT} />
     </div>
   );
 }

@@ -8,7 +8,8 @@ import { useAuth } from "../context/auth-context";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 
-const LANDING_TRANSCRIPT = `Welcome to AURA, the Advanced Under-eye Response Assessment. This simple test measures cognitive stability through eye movements and voice patterns. Please enable voice guidance for step-by-step instructions, and adjust the text size to your comfort. When you're ready, sign in or create an account to continue.`;
+/** Transcript shown in voice panel; audio comes from GET /voice/instructions?type=landing. */
+const LOGIN_PAGE_TRANSCRIPT = `Welcome to AURA, the Advanced Under-eye Response Assessment. This simple test measures cognitive stability through eye movements and voice patterns. Please enable voice guidance for step-by-step instructions. When you're ready, sign in or create an account to continue.`;
 
 type Mode = "login" | "signup";
 
@@ -275,7 +276,7 @@ export function AuthScreen() {
         )}
       </div>
 
-      <VoiceAssistantButton instructionType="landing" transcript={LANDING_TRANSCRIPT} />
+      <VoiceAssistantButton instructionType="landing" transcript={LOGIN_PAGE_TRANSCRIPT} />
     </div>
   );
 }

@@ -1,6 +1,10 @@
 import React from "react";
-import { BookOpen, FileText, ExternalLink } from "lucide-react";
+import { BookOpen, ExternalLink } from "lucide-react";
 import { Card } from "../components/ui/card";
+import { VoiceAssistantButton } from "../components/voice-assistant-button";
+
+const RESEARCH_TRANSCRIPT =
+  "Research references. Papers and sources used by AURA. This page lists external research links and local documents that support the assessment.";
 
 
 
@@ -48,8 +52,9 @@ export function ResearchReferencesScreen() {
               </a>
             </Card>
           ))}
-        </div>   
+        </div>
       </div>
+      <VoiceAssistantButton instructionType="research_references" transcript={RESEARCH_TRANSCRIPT} />
     </div>
   );
 }

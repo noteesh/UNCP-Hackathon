@@ -1,6 +1,10 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { Card } from "../components/ui/card";
+import { VoiceAssistantButton } from "../components/voice-assistant-button";
+
+const ABOUT_TRANSCRIPT =
+  "About AURA. Advanced Under-eye Response Assessment. AURA is a cognitive stability assessment tool that uses eye tracking and voice analysis to help monitor recovery and detect early signs of change. Results are summarized on your dashboard. This tool is for informational support only; always consult your physician about your health and recovery.";
 
 export function AboutScreen() {
   return (
@@ -33,6 +37,7 @@ export function AboutScreen() {
           </p>
         </Card>
       </div>
+      <VoiceAssistantButton instructionType="about_us" transcript={ABOUT_TRANSCRIPT} />
     </div>
   );
 }

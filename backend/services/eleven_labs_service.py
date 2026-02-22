@@ -116,8 +116,28 @@ INSTRUCTION_SET = {
     "baseline_start": "Welcome to AURA. Let’s calibrate your baseline. Please hold the camera in front of you at eye level.",
     "eye_tracking": "Now, keep your head perfectly still. Follow the moving blue dot with your eyes only. Start now.",
     "vocal_test": "Please take a deep breath and repeat the following phrase clearly: The quick brown fox jumps over the lazy dog.",
-    "post_op_start": "Welcome back. We are going to check your recovery status. Please follow the instructions as we did this morning.",
-    "complete": "Test complete. Please wait a moment while we analyze your physiological readiness."
+    "post_op_start": (
+        "Welcome back. We are going to check your recovery status. "
+        "Run a post-operative assessment to compare against your baseline. "
+        "Same short eye-tracking and voice test—results appear on your dashboard. "
+        "Complete the test when you're ready. Your results will be compared to your pre-op baseline."
+    ),
+    "complete": "Test complete. Please wait a moment while we analyze your physiological readiness.",
+    "research_references": (
+        "Research references. Papers and sources used by AURA. "
+        "This page lists external research links and local documents that support the assessment. "
+        "Use the links to open papers in a new tab. Press Read page aloud again to hear this message."
+    ),
+    "about_us": (
+        "About AURA. Advanced Under-eye Response Assessment. "
+        "AURA is a cognitive stability assessment tool that uses eye tracking and voice analysis "
+        "to help monitor recovery and detect early signs of change. It is designed for use before and "
+        "after procedures to establish a baseline and track progress. The assessment includes fixation "
+        "stability, saccadic eye movement, smooth pursuit, and optional voice tests. Results are "
+        "summarized on your dashboard and can be shared with your care team. This tool is for "
+        "informational support only and does not replace professional medical advice. "
+        "Always consult your physician about your health and recovery."
+    ),
 }
 
 @router.get("/voice/instructions")
