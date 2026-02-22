@@ -67,8 +67,8 @@ class SpeechRequest(BaseModel):
 @router.post("/api/voice/generate")
 async def generate_voice(request: SpeechRequest):
     """
-    Receives text (from Gemini reasoning), converts to speech via ElevenLabs,
-    and returns the audio stream directly to the frontend.
+    Converts text to speech via ElevenLabs; returns audio/mpeg.
+    Used by the landing page voice assistant (and others) when sending custom text.
     """
     try:
         # 1. Validate text isn't empty
@@ -104,8 +104,15 @@ async def analyze_and_speak(test_data: dict):
 
 
 
-# Mapping of instruction types to specific text
+# Mapping of instruction types to specific text.
+# Landing page read-aloud: GET /api/voice/instructions?type=landing
 INSTRUCTION_SET = {
+    "landing": (
+        "Welcome to AURA, the Advanced Under-eye Response Assessment. "
+        "This simple test measures cognitive stability through eye movements and voice patterns. "
+        "Please enable voice guidance for step-by-step instructions. "
+        "When you're ready, press View Dashboard or Start Assessment."
+    ),
     "baseline_start": "Welcome to AURA. Let’s calibrate your baseline. Please hold the camera in front of you at eye level.",
     "eye_tracking": "Now, keep your head perfectly still. Follow the moving blue dot with your eyes only. Start now.",
     "vocal_test": "Please take a deep breath and repeat the following phrase clearly: The quick brown fox jumps over the lazy dog.",
