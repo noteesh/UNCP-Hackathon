@@ -148,7 +148,7 @@ test-results/
 playwright/.cache/
 
 # Lock files (optional: some teams commit these)
-# package-lock.json
+package-lock.json
 # yarn.lock
 # Pipfile.lock
 # poetry.lock
