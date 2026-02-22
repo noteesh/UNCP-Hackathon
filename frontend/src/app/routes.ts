@@ -1,4 +1,5 @@
 import { createBrowserRouter } from "react-router";
+import { AuthScreen } from "./screens/auth-screen";
 import { WelcomeScreen } from "./screens/welcome-screen";
 import { InstructionsScreen } from "./screens/instructions-screen";
 import { EyeTestScreen } from "./screens/eye-test-screen";
@@ -10,6 +11,10 @@ import { DashboardScreen } from "./screens/dashboard-screen";
 export const router = createBrowserRouter([
   {
     path: "/",
+    Component: AuthScreen,
+  },
+  {
+    path: "/welcome",
     Component: WelcomeScreen,
   },
   {
