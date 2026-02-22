@@ -5,11 +5,16 @@ import { EyeTestScreen } from "./screens/eye-test-screen";
 import { VoiceTestScreen } from "./screens/voice-test-screen";
 import { ResultsScreen } from "./screens/results-screen";
 import { EmergencyAlertScreen } from "./screens/emergency-alert-screen";
+import { DashboardScreen } from "./screens/dashboard-screen";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     Component: WelcomeScreen,
+  },
+  {
+    path: "/dashboard",
+    Component: DashboardScreen,
   },
   {
     path: "/instructions",

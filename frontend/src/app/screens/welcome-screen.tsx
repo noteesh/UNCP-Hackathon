@@ -4,10 +4,13 @@ import { useState } from "react";
 import { Button } from "../components/ui/button";
 import { VoiceAssistantButton } from "../components/voice-assistant-button";
 import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 
 export function WelcomeScreen() {
   const navigate = useNavigate();
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [patientName, setPatientName] = useState("");
 
   const transcript = `Welcome to AURA, the Advanced Under-eye Response Assessment. This simple test measures cognitive stability through eye movements and voice patterns. Please enable voice guidance for step-by-step instructions, and adjust the text size to your comfort. When you're ready, press Start Assessment.`;
 
@@ -48,13 +51,28 @@ export function WelcomeScreen() {
           </p>
         </div>
 
+        {/* Patient name */}
+        <div className="space-y-2 max-w-md mx-auto">
+          <Label htmlFor="patient-name" className="text-white/80 text-sm">
+            Patient name
+          </Label>
+          <Input
+            id="patient-name"
+            type="text"
+            placeholder="Enter your name"
+            value={patientName}
+            onChange={(e) => setPatientName(e.target.value)}
+            className="bg-white/5 border-white/10 text-white placeholder:text-white/40 rounded-xl h-12"
+          />
+        </div>
+
         {/* Main Actions */}
         <div className="space-y-3 max-w-md mx-auto">
           <Button
-            onClick={() => navigate("/instructions")}
+            onClick={() => navigate(`/dashboard${patientName.trim() ? `?name=${encodeURIComponent(patientName.trim())}` : ""}`)}
             className="w-full h-14 bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] hover:opacity-90 text-white font-semibold text-base rounded-xl shadow-lg shadow-[#00d4ff]/20 transition-all duration-300 hover:scale-[1.02]"
           >
-            Start Assessment
+            View Dashboard
           </Button>
 
           <Button
