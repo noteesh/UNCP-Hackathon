@@ -115,7 +115,7 @@ export function InstructionsScreen() {
         {/* Action Buttons */}
         <div className="flex gap-3">
           <Button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/welcome")}
             variant="outline"
             className="h-12 px-6 border border-white/10 bg-white/5 text-white hover:bg-white/10 text-sm rounded-xl"
           >

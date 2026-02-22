@@ -546,7 +546,7 @@ export function EyeTestScreen() {
       <div className="p-6 relative z-10">
         <div className="max-w-4xl mx-auto flex justify-start">
           <Button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/welcome")}
             variant="outline"
             className="h-10 px-5 border border-white/10 bg-white/5 text-white hover:bg-white/10 text-sm rounded-xl"
           >
