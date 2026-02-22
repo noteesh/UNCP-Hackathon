@@ -16,34 +16,20 @@ import { ResearchReferencesScreen } from "./screens/research-references-screen";
 export const router = createBrowserRouter([
   {
     path: "/",
-    Component: AuthScreen,
-  },
-  {
-    path: "/welcome",
-    Component: WelcomeScreen,
-  },
-  {
-    path: "/dashboard",
-    Component: DashboardScreen,
-  },
-  {
-    path: "/instructions",
-    Component: InstructionsScreen,
-  },
-  {
-    path: "/eye-test",
-    Component: EyeTestScreen,
-  },
-  {
-    path: "/voice-test",
-    Component: VoiceTestScreen,
-  },
-  {
-    path: "/results",
-    Component: ResultsScreen,
-  },
-  {
-    path: "/emergency",
-    Component: EmergencyAlertScreen,
+    Component: AppLayout,
+    children: [
+      { index: true, Component: AuthScreen },
+      { path: "welcome", Component: WelcomeScreen },
+      { path: "dashboard", Component: DashboardScreen },
+      { path: "baseline", Component: BaselineScreen },
+      { path: "post-op", Component: PostOpScreen },
+      { path: "research", Component: ResearchReferencesScreen },
+      { path: "about", Component: AboutScreen },
+      { path: "instructions", Component: InstructionsScreen },
+      { path: "eye-test", Component: EyeTestScreen },
+      { path: "voice-test", Component: VoiceTestScreen },
+      { path: "results", Component: ResultsScreen },
+      { path: "emergency", Component: EmergencyAlertScreen },
+    ],
   },
 ]);
