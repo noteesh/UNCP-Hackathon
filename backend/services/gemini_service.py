@@ -15,11 +15,13 @@ This is a research-support tool, NOT a diagnostic system.
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
 import json
 import logging
 import os
 import re
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +51,19 @@ MAX_RETRIES = 2
 MAX_OUTPUT_TOKENS = 4096*2          # Avoid truncation for long evidence-grounded JSON responses
 MAX_RESEARCH_CONTEXT_CHARS = 60000 # Cap research context to control input token cost
 
+# Optional Backboard memory mode.
+# When enabled, full research context is stored in Backboard assistant memory once,
+# and each request sends only compact patient data.
+USE_BACKBOARD_MEMORY = os.environ.get("USE_BACKBOARD_MEMORY", "false").lower() in (
+    "true", "1", "yes",
+)
+BACKBOARD_BASE_URL = os.environ.get("BACKBOARD_BASE_URL", "https://app.backboard.io/api")
+BACKBOARD_API_KEY = os.environ.get("BACKBOARD_API_KEY", "")
+BACKBOARD_MODEL = os.environ.get("BACKBOARD_MODEL", MODEL_NAME)
+BACKBOARD_ASSISTANT_ID = os.environ.get("BACKBOARD_ASSISTANT_ID", "")
+BACKBOARD_THREAD_ID = os.environ.get("BACKBOARD_THREAD_ID", "")
+BACKBOARD_META_PATH = RESEARCH_DIR / ".backboard_memory.json"
+
 # Runtime research fetching is DISABLED by default.
 # Set ENABLE_RESEARCH_FETCH=true in .env to allow web-search downloads.
 # For production / hosted deployments, pre-fetch locally and commit the files.
@@ -64,8 +79,12 @@ _cached_research: tuple[str, list[str]] | None = None
 _cached_schema: dict[str, Any] | None = None
 _cached_system_prompt: str | None = None
 _cached_analysis_model: genai.GenerativeModel | None = None
+_cached_chat_system_prompt: str | None = None
+_cached_chat_model: genai.GenerativeModel | None = None
+_cached_backboard_system_prompt: str | None = None
 _research_fetched: bool = False
 _cached_search_model: genai.GenerativeModel | None = None
+_cached_backboard_ids: tuple[str, str] | None = None
 
 # Topics for web-search-based research retrieval (used only when
 # backend/research/ is empty or lacks relevant content).
@@ -116,6 +135,328 @@ def _configure_genai() -> None:
         )
     genai.configure(api_key=api_key)
     _genai_configured = True
+
+
+def _is_backboard_enabled() -> bool:
+    return USE_BACKBOARD_MEMORY and bool(BACKBOARD_API_KEY.strip())
+
+
+def _backboard_headers() -> dict[str, str]:
+    return {
+        "X-API-Key": BACKBOARD_API_KEY.strip(),
+    }
+
+
+def _escape_backboard_template(text: str) -> str:
+    """Escape braces to avoid Backboard prompt-template variable expansion."""
+    if not text:
+        return ""
+    return text.replace("{", "{{").replace("}", "}}")
+
+
+def _http_post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    req_headers = {
+        "Content-Type": "application/json",
+        **headers,
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=req_headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read().decode("utf-8", errors="ignore")
+    return json.loads(body) if body else {}
+
+
+def _http_post_form(url: str, payload: dict[str, str], headers: dict[str, str]) -> dict[str, Any]:
+    req_headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        **headers,
+    }
+    encoded = urllib.parse.urlencode(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=encoded,
+        headers=req_headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        body = response.read().decode("utf-8", errors="ignore")
+    return json.loads(body) if body else {}
+
+
+def _http_get_json(url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    req_headers = headers or {}
+    request = urllib.request.Request(
+        url,
+        headers=req_headers,
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        body = response.read().decode("utf-8", errors="ignore")
+    return json.loads(body) if body else {}
+
+
+async def _fetch_patient_name_from_api(patient_id: str) -> str | None:
+    """Fetch patient name via internal API call to /api/patients/{patient_id}."""
+    pid = str(patient_id or "").strip()
+    if not pid:
+        return None
+
+    base_url = (
+        os.environ.get("INTERNAL_API_BASE_URL")
+        or os.environ.get("API_BASE_URL")
+        or "http://127.0.0.1:8000"
+    ).rstrip("/")
+    endpoint = f"{base_url}/api/patients/{urllib.parse.quote(pid, safe='')}"
+
+    try:
+        payload = await asyncio.to_thread(_http_get_json, endpoint)
+    except Exception as exc:
+        logger.warning("Failed to fetch patient profile from %s: %s", endpoint, exc)
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+def _load_backboard_meta() -> dict[str, Any] | None:
+    try:
+        if BACKBOARD_META_PATH.exists():
+            return json.loads(BACKBOARD_META_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def _save_backboard_meta(meta: dict[str, Any]) -> None:
+    try:
+        BACKBOARD_META_PATH.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to save Backboard memory metadata: %s", exc)
+
+
+def _context_fingerprint(system_prompt: str, research_files: list[str]) -> str:
+    payload = {
+        "system_prompt_hash": hashlib.sha256(system_prompt.encode("utf-8")).hexdigest(),
+        "files": sorted(research_files),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _get_or_create_backboard_memory(
+    system_prompt: str,
+    research_files: list[str],
+) -> tuple[str, str]:
+    """Return (assistant_id, thread_id), creating memory once if needed."""
+    global _cached_backboard_ids
+
+    if _cached_backboard_ids is not None:
+        return _cached_backboard_ids
+
+    # Explicit IDs from env always win.
+    if BACKBOARD_ASSISTANT_ID and BACKBOARD_THREAD_ID:
+        _cached_backboard_ids = (BACKBOARD_ASSISTANT_ID, BACKBOARD_THREAD_ID)
+        return _cached_backboard_ids
+
+    fp = _context_fingerprint(system_prompt, research_files)
+    meta = _load_backboard_meta() or {}
+    if (
+        meta.get("fingerprint") == fp
+        and meta.get("assistant_id")
+        and meta.get("thread_id")
+    ):
+        _cached_backboard_ids = (meta["assistant_id"], meta["thread_id"])
+        return _cached_backboard_ids
+
+    headers = _backboard_headers()
+    base = BACKBOARD_BASE_URL.rstrip("/")
+
+    assistant = _http_post_json(
+        f"{base}/assistants",
+        {
+            "name": "AURA Neurological Risk Analyzer",
+            "system_prompt": _escape_backboard_template(system_prompt),
+            "model": BACKBOARD_MODEL,
+        },
+        headers=headers,
+    )
+    assistant_id = assistant.get("assistant_id") or assistant.get("id")
+    if not assistant_id:
+        raise RuntimeError("Backboard assistant creation failed: missing assistant_id")
+
+    thread = _http_post_json(
+        f"{base}/assistants/{assistant_id}/threads",
+        {},
+        headers=headers,
+    )
+    thread_id = thread.get("thread_id") or thread.get("id")
+    if not thread_id:
+        raise RuntimeError("Backboard thread creation failed: missing thread_id")
+
+    _cached_backboard_ids = (assistant_id, thread_id)
+    _save_backboard_meta(
+        {
+            "assistant_id": assistant_id,
+            "thread_id": thread_id,
+            "fingerprint": fp,
+            "model": BACKBOARD_MODEL,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    return _cached_backboard_ids
+
+
+def _send_backboard_message(thread_id: str, user_prompt: str) -> str:
+    base = BACKBOARD_BASE_URL.rstrip("/")
+    payload = {
+        "content": _escape_backboard_template(user_prompt),
+        "stream": "false",
+    }
+    response = _http_post_form(
+        f"{base}/threads/{thread_id}/messages",
+        payload,
+        headers=_backboard_headers(),
+    )
+
+    def _extract_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    if item.strip():
+                        parts.append(item.strip())
+                elif isinstance(item, dict):
+                    for key in ("text", "content", "value", "output", "message"):
+                        extracted = _extract_text(item.get(key))
+                        if extracted:
+                            parts.append(extracted)
+            return "\n".join(part for part in parts if part).strip()
+        if isinstance(value, dict):
+            for key in (
+                "content",
+                "text",
+                "message",
+                "output",
+                "response",
+                "result",
+                "assistant_response",
+                "data",
+            ):
+                if key in value:
+                    extracted = _extract_text(value.get(key))
+                    if extracted:
+                        return extracted
+        return ""
+
+    extracted = _extract_text(response)
+    if extracted:
+        lowered = extracted.lower()
+        if "llm error" in lowered or "missing variables" in lowered:
+            raise RuntimeError(f"Backboard LLM error: {extracted}")
+        return extracted
+
+    if isinstance(response, dict):
+        error_text = _extract_text(response.get("error")) or _extract_text(response.get("detail"))
+        if error_text:
+            raise RuntimeError(f"Backboard API error: {error_text}")
+
+    # Last-resort stringify for diagnostics
+    return json.dumps(response)
+
+
+def _extract_json_block(text: str) -> str:
+    """Extract first JSON object from free-form model text."""
+    stripped = text.strip()
+    if not stripped:
+        return ""
+
+    # Remove markdown fences if present
+    stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
+    stripped = re.sub(r"\s*```$", "", stripped)
+
+    # Direct JSON object
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+
+    start = stripped.find("{")
+    if start == -1:
+        return ""
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(stripped)):
+        ch = stripped[idx]
+
+        if escaped:
+            escaped = False
+            continue
+
+        if ch == "\\":
+            escaped = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return stripped[start : idx + 1]
+
+    return ""
+
+
+def _parse_model_json(raw_text: str) -> dict[str, Any]:
+    """Parse model output into a dict, tolerating wrappers around JSON."""
+    text = raw_text.strip()
+    if not text:
+        raise json.JSONDecodeError("Empty model response", raw_text, 0)
+
+    # Fast path
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    candidate = _extract_json_block(text)
+    if not candidate:
+        raise json.JSONDecodeError("No JSON object found in model response", raw_text, 0)
+
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # Backboard/providers occasionally return Python-literal dict strings.
+    # Accept safely as a fallback, then continue with schema validation.
+    try:
+        literal = ast.literal_eval(candidate)
+        if isinstance(literal, dict):
+            return literal
+    except Exception:
+        pass
+
+    raise json.JSONDecodeError("Top-level JSON must be an object", candidate, 0)
 
 
 # ===================================================================
@@ -578,12 +919,15 @@ _REQUIRED_FIELDS: dict[str, type | tuple[type, ...]] = {
     "risk_level": str,
     "conditions_flagged": list,
     "confidence_score": (int, float),
-    "explanation": str,
+    "explanation": list,
     "research_references_used": list,
 }
 
 _VALID_RISK_LEVELS = {"low", "moderate", "high", "inconclusive"}
 _VALID_CONDITIONS = {"post_op_delirium", "subclinical_stroke"}
+_EXPLANATION_FALLBACK_ITEM = (
+    "insufficient_evidence:NA:NA:Insufficient research-supported evidence for risk determination."
+)
 
 
 def _load_output_schema() -> dict[str, Any]:
@@ -602,10 +946,79 @@ def _load_output_schema() -> dict[str, Any]:
             "risk_level": "low | moderate | high",
             "conditions_flagged": ["post_op_delirium", "subclinical_stroke"],
             "confidence_score": "0-1",
-            "explanation": "Detailed explanation referencing research findings",
+            "explanation": [
+                "metric_name:baseline_value:latest_value:evidence sentence",
+                "metric_name:baseline_value:latest_value:evidence sentence",
+            ],
             "research_references_used": ["paper_name_1.pdf", "paper_name_2.pdf"],
         }
     return _cached_schema
+
+
+def _is_valid_explanation_item(item: Any) -> bool:
+    if not isinstance(item, str):
+        return False
+    entry = item.strip()
+    if not entry:
+        return False
+    parts = [part.strip() for part in entry.split(":", 3)]
+    if len(parts) != 4:
+        return False
+    metric, baseline, latest, evidence = parts
+    if not metric or not baseline or not latest or not evidence:
+        return False
+
+    lower = entry.lower()
+    # Keep references in research_references_used only.
+    forbidden_reference_tokens = (".pdf", "http://", "https://", "doi")
+    if any(token in lower for token in forbidden_reference_tokens):
+        return False
+
+    return True
+
+
+def _normalise_explanation(raw_explanation: Any) -> list[str]:
+    """Normalize explanation into required list format:
+    metric_name:baseline:latest:evidence
+    """
+    candidate_lines: list[str] = []
+
+    if isinstance(raw_explanation, list):
+        candidate_lines = [str(item).strip() for item in raw_explanation if str(item).strip()]
+    elif isinstance(raw_explanation, str):
+        candidate_lines = [line.strip() for line in raw_explanation.splitlines() if line.strip()]
+
+    normalized: list[str] = []
+
+    for line in candidate_lines:
+        cleaned = re.sub(r"^[-*•]\s*", "", line).strip()
+
+        if _is_valid_explanation_item(cleaned):
+            normalized.append(cleaned)
+            continue
+
+        match = re.search(
+            r"Metric:\s*([^;]+);\s*Baseline:\s*([^;]+);\s*Latest:\s*([^;]+);\s*Trend:\s*([^;]+);\s*Evidence:\s*(.+)",
+            cleaned,
+            re.IGNORECASE,
+        )
+        if match:
+            metric = match.group(1).strip()
+            baseline = match.group(2).strip()
+            latest = match.group(3).strip()
+            trend = match.group(4).strip()
+            evidence = match.group(5).strip()
+            normalized.append(f"{metric}:{baseline}:{latest}:Trend {trend}. {evidence}")
+            continue
+
+        # Best-effort fallback for arbitrary narrative bullets.
+        normalized.append(f"unknown_metric:NA:NA:{cleaned[:220]}")
+
+    # Validate and filter
+    validated = [item for item in normalized if _is_valid_explanation_item(item)]
+    if not validated:
+        return [_EXPLANATION_FALLBACK_ITEM]
+    return validated[:6]
 
 
 def _validate_response(response: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -646,6 +1059,19 @@ def _validate_response(response: dict[str, Any]) -> tuple[bool, list[str]]:
             if item not in _VALID_CONDITIONS:
                 errors.append(f"Invalid condition_flagged value: '{item}'")
 
+    # explanation format
+    explanation = response.get("explanation")
+    if isinstance(explanation, list):
+        if len(explanation) == 0:
+            errors.append("explanation must contain at least one list entry")
+        else:
+            for idx, item in enumerate(explanation):
+                if not _is_valid_explanation_item(item):
+                    errors.append(
+                        f"Invalid explanation entry at index {idx}. "
+                        "Required format: metric_name:baseline:latest:evidence (no references)."
+                    )
+
     return (len(errors) == 0, errors)
 
 
@@ -671,9 +1097,7 @@ def _fix_response(raw: dict[str, Any]) -> dict[str, Any]:
         fixed["confidence_score"] = 0.0
 
     # explanation
-    fixed["explanation"] = str(
-        raw.get("explanation", "Analysis completed with validation warnings.")
-    )
+    fixed["explanation"] = _normalise_explanation(raw.get("explanation", []))
 
     # research_references_used
     refs = raw.get("research_references_used", [])
@@ -694,11 +1118,12 @@ def _safe_fallback_response(reason: str) -> dict[str, Any]:
         "risk_level": "inconclusive",
         "conditions_flagged": [],
         "confidence_score": 0.0,
-        "explanation": (
-            f"Unable to complete analysis: {reason}. "
-            f"Insufficient evidence to make any risk determination. "
-            f"This is a research-support tool and is not a diagnostic system."
-        ),
+        "explanation": [
+            (
+                "insufficient_evidence:NA:NA:"
+                f"Unable to complete analysis ({reason[:180]})."
+            )
+        ],
         "research_references_used": [],
     }
 
@@ -737,21 +1162,25 @@ Field constraints:
 - "risk_level": exactly one of "low", "moderate", "high", or "inconclusive" (string)
 - "conditions_flagged": array of zero or more of "post_op_delirium", "subclinical_stroke"
 - "confidence_score": number between 0.0 and 1.0 inclusive
-- "explanation": short bullet-point string (3-6 bullets) listing EXACT metrics used
+- "explanation": array of strings where each element uses EXACT format:
+    <metric_name>:<baseline>:<latest>:<evidence (max 1 sentence)>
 - "research_references_used": array of strings formatted as "Paper Title — Authors"
 
 ## EXPLANATION FORMAT — MANDATORY
-The "explanation" value MUST be concise and use bullet points only.
-Use this exact style inside the string (newline-separated):
-- Metric: <metric_name>; Baseline: <value>; Latest: <value>; Trend: <increase/decrease/stable>; Evidence: <short note>
-- Metric: <metric_name>; Baseline: <value>; Latest: <value>; Trend: <increase/decrease/stable>; Evidence: <short note>
+The "explanation" value MUST be a JSON array of entries.
+Each entry MUST be exactly:
+<metric_name>:<baseline>:<latest>:<evidence (max 1 sentence)>
+
+Example:
+["antisaccade_latency:280:350:Latency increased vs baseline and aligns with documented deterioration pattern."]
 
 Rules:
-- Keep to 3-6 bullets total
+- Keep to 3-6 list entries total when possible
 - Mention only metrics actually present in patient input
 - Include exact metric names used for risk assessment
-- No long narrative paragraph
-- If evidence is insufficient, use 1-2 short bullets and state insufficiency
+- Do NOT include citations, paper filenames, or URLs inside explanation entries
+- Put all references only in "research_references_used"
+- If evidence is insufficient, use 1-2 entries and state insufficiency
 
 ## EVIDENCE-ONLY REASONING — ABSOLUTE REQUIREMENT
 You are PROHIBITED from:
@@ -824,9 +1253,87 @@ REQUIRED ANALYSIS:
 3. Assess risk for post-operative delirium and subclinical stroke.
 4. Base ALL conclusions strictly on the research documents in your context.
 5. If evidence is insufficient, explicitly state so and return inconclusive risk.
-6. Keep explanation short and bullet-pointed, naming the exact metrics used.
+6. Return explanation as a JSON list where each element is:
+    <metric_name>:<baseline>:<latest>:<evidence (max 1 sentence)>
+7. Do NOT include references/citations in explanation entries.
 
 Return ONLY the valid JSON object. No other text."""
+
+
+def _build_chat_system_prompt(
+    research_context: str,
+    research_files: list[str],
+) -> str:
+    """Construct chat-focused system instructions using the same research context."""
+    research_block = (
+        "Use ONLY the following research documents as evidence:\n\n"
+        f"{research_context}"
+        if research_context.strip()
+        else "No research documents are available. Be transparent about that limitation."
+    )
+
+    return f"""You are a clinical research support chatbot.
+
+Rules:
+- Use only the provided research context and do not invent facts.
+- Do not provide diagnosis; provide risk-support information only.
+- Be concise and directly answer the user's text input.
+
+{research_block}
+
+Available research files:
+{json.dumps(research_files)}"""
+
+
+def _build_backboard_base_system_prompt(
+    research_context: str,
+    research_files: list[str],
+) -> str:
+    """Single shared Backboard prompt used by both /api/analyze and /api/chat.
+
+    Context is injected once at assistant creation time, then each endpoint sends
+    only incremental input (analyze payload or chat message).
+    """
+    schema_template = _load_output_schema()
+    schema_str = json.dumps(schema_template, indent=2)
+    research_block = (
+        "The following research documents are your ONLY evidence source:\n\n"
+        f"{research_context}"
+        if research_context.strip()
+        else "No research documents are available."
+    )
+
+    return f"""You are a clinical research assistant for ocular biomarkers and neurological risk support.
+
+The conversation has two input modes:
+
+MODE A — ANALYZE INPUT
+- If user input is a JSON object containing patient eye-movement test data (e.g., patient_id, age, baseline, time_series), treat it as analysis input.
+- Return ONLY a valid JSON object with exactly this schema:
+{schema_str}
+- For analysis mode, enforce:
+  - risk_level in [low, moderate, high, inconclusive]
+  - conditions_flagged subset of [post_op_delirium, subclinical_stroke]
+  - confidence_score in [0.0, 1.0]
+    - explanation as array entries in this exact format:
+        <metric_name>:<baseline>:<latest>:<evidence (max 1 sentence)>
+    - explanation entries must not include references/citations/URLs
+  - research_references_used as ["Paper Title — Authors", ...]
+
+MODE B — CHAT INPUT
+- If user input is normal conversational text (not patient-test JSON), respond like a normal concise chat assistant.
+- Do NOT return analysis schema JSON for normal chat.
+- Keep responses evidence-grounded and non-diagnostic.
+
+Global rules:
+- Use ONLY the provided research documents as evidence.
+- Do not invent facts or citations.
+- This is research-support, not diagnosis.
+
+{research_block}
+
+Available research files:
+{json.dumps(research_files)}"""
 
 
 # ===================================================================
@@ -848,10 +1355,11 @@ async def analyze_eye_movement(data: dict[str, Any]) -> dict[str, Any]:
     """
 
     # ------ 1. Configure API ------
-    try:
-        _configure_genai()
-    except EnvironmentError as exc:
-        return _safe_fallback_response(str(exc))
+    if not _is_backboard_enabled():
+        try:
+            _configure_genai()
+        except EnvironmentError as exc:
+            return _safe_fallback_response(str(exc))
 
     # ------ 2. Ensure research is available ------
     if ENABLE_RESEARCH_FETCH:
@@ -867,7 +1375,7 @@ async def analyze_eye_movement(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     # ------ 3. Load research context (cached after first call) ------
-    global _cached_research, _cached_system_prompt, _cached_analysis_model
+    global _cached_research, _cached_system_prompt, _cached_analysis_model, _cached_backboard_system_prompt
     try:
         if _cached_research is not None:
             research_context, research_files = _cached_research
@@ -890,25 +1398,67 @@ async def analyze_eye_movement(data: dict[str, Any]) -> dict[str, Any]:
     if _cached_system_prompt is None:
         _cached_system_prompt = _build_system_prompt(research_context, research_files)
     system_prompt = _cached_system_prompt
+
+    if _cached_backboard_system_prompt is None:
+        _cached_backboard_system_prompt = _build_backboard_base_system_prompt(
+            research_context,
+            research_files,
+        )
+
     user_prompt = _build_user_prompt(data)
 
     # ------ 6. Build model once (cached across calls & retries) ------
-    if _cached_analysis_model is None:
-        _cached_analysis_model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            generation_config={
-                "temperature": TEMPERATURE,
-                "response_mime_type": "application/json",
-                "max_output_tokens": MAX_OUTPUT_TOKENS,
-            },
-            system_instruction=system_prompt,
-        )
-    model = _cached_analysis_model
+    model = None
+    backboard_thread_id = None
 
-    # ------ 7. Call Gemini with retry loop ------
+    if _is_backboard_enabled():
+        try:
+            _, backboard_thread_id = _get_or_create_backboard_memory(
+                system_prompt=_cached_backboard_system_prompt,
+                research_files=research_files,
+            )
+        except Exception as exc:
+            logger.warning("Backboard memory unavailable, falling back to direct Gemini: %s", exc)
+
+    if backboard_thread_id is None:
+        if _cached_analysis_model is None:
+            _cached_analysis_model = genai.GenerativeModel(
+                model_name=MODEL_NAME,
+                generation_config={
+                    "temperature": TEMPERATURE,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
+                },
+                system_instruction=system_prompt,
+            )
+        model = _cached_analysis_model
+
+    def _ensure_direct_model() -> genai.GenerativeModel:
+        nonlocal model, backboard_thread_id
+        global _cached_analysis_model
+
+        backboard_thread_id = None
+        if _cached_analysis_model is None:
+            _configure_genai()
+            _cached_analysis_model = genai.GenerativeModel(
+                model_name=MODEL_NAME,
+                generation_config={
+                    "temperature": TEMPERATURE,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
+                },
+                system_instruction=system_prompt,
+            )
+        model = _cached_analysis_model
+        return model
+
+    # ------ 7. Call model with retry loop ------
     last_error: str = "Unknown error"
+    started_with_backboard = backboard_thread_id is not None
+    total_attempts = MAX_RETRIES + 1 + (1 if started_with_backboard else 0)
+    final_attempt_index = total_attempts - 1
 
-    for attempt in range(MAX_RETRIES + 1):
+    for attempt in range(total_attempts):
         try:
 
             prompt = user_prompt
@@ -922,18 +1472,25 @@ async def analyze_eye_movement(data: dict[str, Any]) -> dict[str, Any]:
                     f"Errors: {last_error}"
                 )
 
-            response = await model.generate_content_async(prompt)
+            if backboard_thread_id is not None:
+                raw_text = _send_backboard_message(backboard_thread_id, prompt).strip()
+            else:
+                response = await model.generate_content_async(prompt)
+                if not response.text:
+                    last_error = "Gemini returned empty response"
+                    continue
+                raw_text = response.text.strip()
 
-            if not response.text:
-                last_error = "Gemini returned empty response"
+            if not raw_text:
+                last_error = "Model returned empty response body"
+                if backboard_thread_id is not None and attempt < MAX_RETRIES:
+                    logger.warning(
+                        "Backboard returned empty body; switching to direct Gemini for retry"
+                    )
+                    _ensure_direct_model()
                 continue
 
-            # Strip any accidental markdown fences
-            raw_text = response.text.strip()
-            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-
-            result: dict[str, Any] = json.loads(raw_text)
+            result: dict[str, Any] = _parse_model_json(raw_text)
 
             is_valid, errors = _validate_response(result)
             if is_valid:
@@ -957,19 +1514,164 @@ async def analyze_eye_movement(data: dict[str, Any]) -> dict[str, Any]:
 
         except json.JSONDecodeError as exc:
             last_error = f"Invalid JSON from model: {exc}"
-            if attempt == MAX_RETRIES:
+            if backboard_thread_id is not None and attempt < MAX_RETRIES:
+                logger.warning(
+                    "Backboard response was not parseable JSON; retrying Backboard"
+                )
+            if backboard_thread_id is not None and attempt == MAX_RETRIES:
+                logger.warning("Backboard failed after retries; using direct Gemini as last resort")
+                _ensure_direct_model()
+                continue
+            if attempt == final_attempt_index:
                 return _safe_fallback_response(last_error)
         except Exception as exc:
             last_error = f"Gemini API error: {exc}"
-            if attempt == MAX_RETRIES:
+            if backboard_thread_id is not None and attempt < MAX_RETRIES:
+                logger.warning("Backboard request failed; retrying Backboard: %s", exc)
+                continue
+            if backboard_thread_id is not None and attempt == MAX_RETRIES:
+                logger.warning("Backboard unavailable after retries; using direct Gemini as last resort")
+                _ensure_direct_model()
+                continue
+            if attempt == final_attempt_index:
                 return _safe_fallback_response(last_error)
 
     return _safe_fallback_response(last_error)
 
 
+def _extract_chat_text(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    if not text:
+        return ""
+
+    # If model returned JSON, try to pull common response fields.
+    try:
+        parsed = _parse_model_json(text)
+        for key in ("chatbot_response", "response", "message", "answer", "content"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return json.dumps(parsed)
+    except Exception:
+        pass
+
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+async def chat_with_research_context(message: str) -> dict[str, str]:
+    """Chat endpoint that reuses existing model/context setup without resending context as user text."""
+    user_message = str(message or "").strip()
+    if not user_message:
+        return {"chatbot_response": "Please provide a non-empty message."}
+
+    if not _is_backboard_enabled():
+        try:
+            _configure_genai()
+        except EnvironmentError as exc:
+            return {"chatbot_response": f"Configuration error: {exc}"}
+
+    if ENABLE_RESEARCH_FETCH:
+        try:
+            fetch_research_if_needed()
+        except Exception as exc:
+            logger.warning("Research fetching failed for chat: %s", exc)
+
+    global _cached_research, _cached_chat_system_prompt, _cached_chat_model, _cached_backboard_system_prompt
+    try:
+        if _cached_research is not None:
+            research_context, research_files = _cached_research
+        else:
+            research_context, research_files = load_research_context()
+            _cached_research = (research_context, research_files)
+    except Exception as exc:
+        return {"chatbot_response": f"Unable to load research context: {exc}"}
+
+    if not research_files:
+        return {
+            "chatbot_response": (
+                "No research documents are available, so I cannot provide an evidence-based response right now."
+            )
+        }
+
+    if _cached_chat_system_prompt is None:
+        _cached_chat_system_prompt = _build_chat_system_prompt(research_context, research_files)
+
+    if _cached_backboard_system_prompt is None:
+        _cached_backboard_system_prompt = _build_backboard_base_system_prompt(
+            research_context,
+            research_files,
+        )
+
+    if _is_backboard_enabled():
+        try:
+            _, thread_id = _get_or_create_backboard_memory(
+                system_prompt=_cached_backboard_system_prompt,
+                research_files=research_files,
+            )
+            backboard_text = _send_backboard_message(thread_id, user_message)
+            chat_text = _extract_chat_text(backboard_text)
+            if chat_text:
+                # Guardrail: if Backboard still returns analysis JSON for plain chat,
+                # ask once for conversational output without re-sending context.
+                try:
+                    parsed = _parse_model_json(chat_text)
+                    if all(
+                        key in parsed
+                        for key in (
+                            "risk_level",
+                            "conditions_flagged",
+                            "confidence_score",
+                            "explanation",
+                            "research_references_used",
+                        )
+                    ):
+                        corrected = _send_backboard_message(
+                            thread_id,
+                            "The previous user input was normal chat text. Reply conversationally in plain text (no JSON schema).",
+                        )
+                        corrected_text = _extract_chat_text(corrected)
+                        if corrected_text:
+                            return {"chatbot_response": corrected_text}
+                except Exception:
+                    pass
+                return {"chatbot_response": chat_text}
+        except Exception as exc:
+            logger.warning("Backboard chat failed, falling back to direct Gemini: %s", exc)
+
+    if _cached_chat_model is None:
+        _configure_genai()
+        _cached_chat_model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 1024,
+            },
+            system_instruction=_cached_chat_system_prompt,
+        )
+
+    try:
+        response = await _cached_chat_model.generate_content_async(user_message)
+        text = response.text.strip() if response.text else ""
+        if not text:
+            return {"chatbot_response": "No response was generated."}
+        return {"chatbot_response": _extract_chat_text(text)}
+    except Exception as exc:
+        return {"chatbot_response": f"Chat generation failed: {exc}"}
+
+
 @router.post("/api/analyze")
 async def analyze_route(data: dict[str, Any]):
-    return await analyze_eye_movement(data)
+    result = await analyze_eye_movement(data)
+    patient_name = await _fetch_patient_name_from_api(str(data.get("patient_id", "")))
+    result["patient_name"] = patient_name
+    return result
+
+
+@router.post("/api/chat")
+async def chat_route(data: dict[str, Any]):
+    return await chat_with_research_context(str(data.get("message", "")))
 
 
 # ===================================================================
