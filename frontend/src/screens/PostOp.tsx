@@ -29,7 +29,6 @@ export function PostOp({ onNavigate }: PostOpProps) {
   const {
     state: ocularState,
     testMetrics: ocularMetrics,
-    liveDeviation: ocularLiveDeviation,
     startRecording: startOcularRecording,
     stopRecording: stopOcularRecording,
   } = useOcularTracking({

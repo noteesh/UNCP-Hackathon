@@ -28,8 +28,8 @@ export function PreOp({ onNavigate }: PreOpProps) {
 
   const {
     state: ocularState,
-    lastScore: ocularScore,
-    liveScore: ocularLiveScore,
+    testMetrics: ocularMetrics,
+    liveDeviation: ocularLiveDeviation,
     startRecording: startOcularRecording,
     stopRecording: stopOcularRecording,
   } = useOcularTracking({
@@ -84,6 +84,13 @@ export function PreOp({ onNavigate }: PreOpProps) {
       await startOcularRecording()
     }
   }
+
+  const ocularScore = ocularMetrics
+    ? Math.round(Math.max(0, 100 - ocularMetrics.averageDeviation * 600))
+    : null
+  const ocularLiveScore = ocularLiveDeviation != null
+    ? Math.round(Math.max(0, 100 - ocularLiveDeviation * 600))
+    : null
 
   // During recording show live score; after stop show final score; otherwise default
   const displayOcularScore =

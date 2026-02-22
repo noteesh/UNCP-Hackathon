@@ -46,7 +46,6 @@ const LEFT_EYE_TOP = 159    // Left eye top
 const LEFT_EYE_BOTTOM = 145 // Left eye bottom
 
 // Iris landmarks (these track actual pupil position!)
-const LEFT_IRIS_CENTER = 473      // Center-ish of iris
 const LEFT_IRIS_TOP = 468         // Top of iris contour
 const LEFT_IRIS_BOTTOM = 471      // Bottom of iris contour
 const LEFT_IRIS_LEFT = 469        // Left of iris 

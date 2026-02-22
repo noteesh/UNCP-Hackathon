@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Clock } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { AuraButton } from '../components/AuraButton'
 import { AnimatedBackground } from '../components/AnimatedBackground'
 
@@ -58,7 +58,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             hidden: {},
           }}
         >
-          {PATIENTS.map((p, i) => (
+          {PATIENTS.map((p) => (
             <motion.div
               key={p.name}
               variants={{

@@ -16,7 +16,6 @@ export function Intake({ onNavigate, onFlow, initialFlow }: IntakeProps) {
   const [name, setName] = useState('')
   const [id, setId] = useState('')
   const [procedure, setProcedure] = useState('')
-  const [surgeon, setSurgeon] = useState('')
   const [date, setDate] = useState('')
 
   const handleSubmit = (e: React.FormEvent) => {
