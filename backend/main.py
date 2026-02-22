@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
+from services.eleven_labs_service import router as eleven_labs_router
 from services.mongodb_atlas_service import connect, disconnect
 
+app = FastAPI(title="AURA API", lifespan=lifespan)
+
+app.include_router(eleven_labs_router)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -14,7 +17,7 @@ async def lifespan(app: FastAPI):
     await disconnect()
 
 
-app = FastAPI(title="AURA API", lifespan=lifespan)
+
 
 # ---------------------------------------------------------------------------
 # CORS — allow the React dev server and any deployed frontend origin
@@ -36,6 +39,10 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
+
+
+
 
 @app.get("/")
 def root():
