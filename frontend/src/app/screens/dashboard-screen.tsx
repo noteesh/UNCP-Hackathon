@@ -401,7 +401,7 @@ export function DashboardScreen() {
                 }}
               >
                 <span className="font-semibold capitalize" style={{ color: riskStyle.bg }}>
-                  {data.has_clinical_summary ? riskStyle.label : "NO DATA"}
+                  {data.has_clinical_summary ? riskStyle.label : "No data"}
                 </span>
               </div>
             </Card>
@@ -425,7 +425,7 @@ export function DashboardScreen() {
                   >
                     {c.replace(/_/g, " ")}
                   </Badge>
-                )) : <span className="text-sm text-white/60">NO DATA</span>}
+                )) : <span className="font-semibold capitalize" style={{ color: riskStyle.bg }}>No conditions</span>}
               </div>
             </Card>
           </motion.div>
@@ -440,7 +440,7 @@ export function DashboardScreen() {
               </div>
               <div className="space-y-2">
                 <p className="text-2xl font-bold text-white">
-                  {data.has_clinical_summary ? `${(data.confidence_score * 100).toFixed(0)}%` : "NO DATA"}
+                  {data.has_clinical_summary ? `${(data.confidence_score * 100).toFixed(0)}%` : "0%"}
                 </p>
                 <Progress
                   value={data.has_clinical_summary ? data.confidence_score * 100 : 0}

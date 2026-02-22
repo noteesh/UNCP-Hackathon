@@ -1,6 +1,7 @@
 import React from "react";
 import { Outlet, useLocation } from "react-router";
 import { AppHeader } from "./app-header";
+import { ChatBotButton } from "./chat-bot-button";
 
 export function AppLayout() {
   const { pathname } = useLocation();
@@ -12,6 +13,7 @@ export function AppLayout() {
       <main className="flex-1">
         <Outlet />
       </main>
+      <ChatBotButton />
     </div>
   );
 }

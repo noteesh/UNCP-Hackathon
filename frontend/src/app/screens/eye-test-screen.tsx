@@ -723,7 +723,7 @@ export function EyeTestScreen() {
   };
 
   const handleContinue = () => {
-    navigate("/voice-test");
+    navigate("/results");
   };
 
   useEffect(() => {
@@ -960,7 +960,7 @@ export function EyeTestScreen() {
                   disabled={isGeminiLoading}
                   className="col-span-2 h-11 rounded-xl font-semibold bg-[#00d4ff] text-[#0a0f1e] hover:opacity-90"
                 >
-                  {isGeminiLoading ? "Generating AI Summary..." : "Continue to Voice Test"}
+                  {isGeminiLoading ? "Generating AI Summary..." : "Continue to Results"}
                 </Button>
                 <div className="col-span-2 rounded-xl bg-white/5 border border-white/10 p-4 space-y-2">
                   <p className="text-[10px] text-white/50 uppercase tracking-wider">Gemini summary</p>
