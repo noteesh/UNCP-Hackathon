@@ -1,37 +1,11 @@
-# AURA — Automated Universal Recovery Assessment (React)
 
-A premium, frontend-only digital clearance platform for surgical patients, built with React, **Framer Motion**, **Tailwind CSS**, and **Lucide React**.
+  # Design AURA Web App UI
 
-## Stack
+  This is a code bundle for Design AURA Web App UI. The original project is available at https://www.figma.com/design/CXWXiNt0sIgGQBfYo2NEGm/Design-AURA-Web-App-UI.
 
-- **Vite** + **React** + **TypeScript**
-- **Framer Motion** — page transitions, staggered reveals, animated gauge, typewriter, hover/tap micro-interactions
-- **Tailwind CSS** — design tokens (teal, violet, status colors), glassmorphism, responsive layout
-- **Lucide React** — icons (Activity, Eye, Mic, ArrowLeft, AlertTriangle, Lock, Clock)
+  ## Running the code
 
-## Run
+  Run `npm i` to install the dependencies.
 
-```bash
-npm install
-npm run dev
-```
-
-Then open **http://localhost:5173**.
-
-## Build
-
-```bash
-npm run build
-npm run preview
-```
-
-## Screens
-
-1. **Landing** — Hero, AURA logo, tagline, heartbeat line, CTAs (Pre-Op / Post-Op)
-2. **Intake** — 3-step progress, patient form
-3. **Pre-Op** — Ocular (figure-8 dot) + Vocal tests, baseline score 94/100
-4. **Post-Op** — Same tests with “off” feel, score 61/100
-5. **Report** — Animated gauge 0→61, typewriter AI analysis, metrics, HOLD banner, locked discharge cert
-6. **Dashboard** — 6 patient cards, live clock, status badges
-
-All data is mocked; no backend.
+  Run `npm run dev` to start the development server.
+  

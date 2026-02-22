@@ -27,13 +27,16 @@ router = APIRouter()
 
 def call_eleven_labs(
     text: str,
-    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
-    model_id: str = "eleven_flash_v2_5",
-    stability: float | None = None,
+    voice_id: str = "1NThU4PKZ475tX1Ubtfy",
+    model_id: str = "eleven_multilingual_v2",
+    stability: float | None = 0.4,
+    similarity_boost: float | None = 0.75,
     **kwargs,
 ) -> bytes:
     """
     Call Eleven Labs text-to-speech API. Uses ELEVENLABS_API_KEY from .env.
+    Lower stability = more expressive; higher = more monotone. similarity_boost
+    keeps the voice closer to the original (website preview) sound.
     """
     client = ElevenLabs(api_key=_get_api_key())
     opts: dict = {
@@ -43,8 +46,13 @@ def call_eleven_labs(
         "output_format": "mp3_44100_128",
         **kwargs,
     }
+    voice_settings: dict = {}
     if stability is not None:
-        opts["voice_settings"] = {"stability": stability}
+        voice_settings["stability"] = stability
+    if similarity_boost is not None:
+        voice_settings["similarity_boost"] = similarity_boost
+    if voice_settings:
+        opts["voice_settings"] = voice_settings
     result = client.text_to_speech.convert(**opts)
     if hasattr(result, "read"):
         return result.read()
@@ -59,8 +67,8 @@ class SpeechRequest(BaseModel):
 @router.post("/api/voice/generate")
 async def generate_voice(request: SpeechRequest):
     """
-    Receives text (from Gemini reasoning), converts to speech via ElevenLabs,
-    and returns the audio stream directly to the frontend.
+    Converts text to speech via ElevenLabs; returns audio/mpeg.
+    Used by the landing page voice assistant (and others) when sending custom text.
     """
     try:
         # 1. Validate text isn't empty
@@ -72,7 +80,7 @@ async def generate_voice(request: SpeechRequest):
         audio_data = call_eleven_labs(
             text=request.text,
             voice_id=request.voice_id,
-            model_id="eleven_flash_v2_5" # Low-latency for bedside apps
+            model_id="eleven_multilingual_v2",  # more natural; use eleven_flash_v2_5 for lower latency
         )
 
         # 3. Return as a Streaming/Binary response
@@ -96,8 +104,15 @@ async def analyze_and_speak(test_data: dict):
 
 
 
-# Mapping of instruction types to specific text
+# Mapping of instruction types to specific text.
+# Landing page read-aloud: GET /api/voice/instructions?type=landing
 INSTRUCTION_SET = {
+    "landing": (
+        "Welcome to AURA, the Advanced Under-eye Response Assessment. "
+        "This simple test measures cognitive stability through eye movements and voice patterns. "
+        "Please enable voice guidance for step-by-step instructions. "
+        "When you're ready, press View Dashboard or Start Assessment."
+    ),
     "baseline_start": "Welcome to AURA. Let’s calibrate your baseline. Please hold the camera in front of you at eye level.",
     "eye_tracking": "Now, keep your head perfectly still. Follow the moving blue dot with your eyes only. Start now.",
     "vocal_test": "Please take a deep breath and repeat the following phrase clearly: The quick brown fox jumps over the lazy dog.",
@@ -117,13 +132,13 @@ async def get_instructions(type: str = Query(..., description="The key of the in
         raise HTTPException(status_code=404, detail="Instruction type not found")
 
     try:
-        # 2. Call the ElevenLabs service
-        # Using a slightly higher 'stability' for instructions to sound more authoritative/clear
+        # 2. Call the ElevenLabs service (stability ~0.4 = more expressive, closer to website preview)
         audio_data = call_eleven_labs(
             text=text,
-            voice_id="21m00Tcm4TlvDq8ikWAM", # Keeping the same 'Nurse' voice for consistency
-            stability=0.8,
-            model_id="eleven_flash_v2_5"
+            voice_id="21m00Tcm4TlvDq8ikWAM",
+            stability=0.4,
+            similarity_boost=0.75,
+            model_id="eleven_multilingual_v2",
         )
 
         return Response(content=audio_data, media_type="audio/mpeg")
