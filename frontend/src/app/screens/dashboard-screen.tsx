@@ -43,10 +43,16 @@ type DashboardData = {
   last_assessment_at: string;
   baseline_assessment_at: string;
   patient_name: string;
+  has_clinical_summary: boolean;
 };
 
 type SessionRecord = {
   timestamp?: string;
+  session_averages?: Record<string, number | null>;
+  baseline_snapshot?: Record<string, number | null>;
+  derived_metrics?: {
+    deltas_vs_baseline?: Record<string, number | null>;
+  };
   gemini_summary?: {
     risk_level?: string;
     conditions_flagged?: string[];
@@ -61,6 +67,26 @@ type PatientRecord = {
   name?: string;
   created_at?: string;
 };
+
+function formatMetricEntry(
+  metricKey: string,
+  baselineValue: number | null | undefined,
+  latestValue: number | null | undefined,
+  deltaValue: number | null | undefined,
+): string | null {
+  if (latestValue == null) return null;
+
+  const baseline = baselineValue ?? latestValue;
+  const latest = latestValue;
+  const delta = deltaValue ?? (baseline != null ? latest - baseline : 0);
+  const trend = delta > 0 ? "increased" : delta < 0 ? "decreased" : "stable";
+  const evidence =
+    delta === 0
+      ? "Initial baseline session captured for this metric."
+      : `Metric ${trend} by ${Math.abs(delta).toFixed(4)} versus baseline.`;
+
+  return `${metricKey}:${baseline}:${latest}:${evidence}`;
+}
 
 function getRiskStyle(level: string) {
   switch (level) {
@@ -120,6 +146,9 @@ export function DashboardScreen() {
         const latest = sessionsData.length > 0 ? sessionsData[sessionsData.length - 1] : null;
         const first = sessionsData.length > 0 ? sessionsData[0] : null;
         const summary = latest?.gemini_summary || {};
+        const sessionAverages = latest?.session_averages || {};
+        const baselineSnapshot = latest?.baseline_snapshot || {};
+        const deltas = latest?.derived_metrics?.deltas_vs_baseline || {};
 
         const hasSummaryData =
           !!summary.risk_level ||
@@ -127,7 +156,21 @@ export function DashboardScreen() {
           (Array.isArray(summary.explanation) && summary.explanation.length > 0) ||
           (Array.isArray(summary.conditions_flagged) && summary.conditions_flagged.length > 0);
 
-        if (!latest || !hasSummaryData) {
+        const fallbackExplanation = Object.keys(sessionAverages)
+          .map((metricKey) =>
+            formatMetricEntry(
+              metricKey,
+              baselineSnapshot[metricKey],
+              sessionAverages[metricKey],
+              deltas[`delta_${metricKey}`],
+            )
+          )
+          .filter((entry): entry is string => !!entry);
+
+        const explanationFromSummary = Array.isArray(summary.explanation) ? summary.explanation : [];
+        const explanation = explanationFromSummary.length > 0 ? explanationFromSummary : fallbackExplanation;
+
+        if (!latest || explanation.length === 0) {
           if (!cancelled) {
             setDashboardData(null);
             setLoading(false);
@@ -144,7 +187,7 @@ export function DashboardScreen() {
             typeof summary.confidence_score === "number"
               ? summary.confidence_score
               : 0,
-          explanation: Array.isArray(summary.explanation) ? summary.explanation : [],
+          explanation,
           research_references_used: Array.isArray(summary.research_references_used)
             ? summary.research_references_used
             : [],
@@ -155,6 +198,7 @@ export function DashboardScreen() {
             first?.timestamp || patientData.created_at || new Date().toISOString(),
           patient_name:
             summary.patient_name || patientData.name || fallbackPatientName,
+          has_clinical_summary: hasSummaryData,
         };
 
         if (!cancelled) {
@@ -179,6 +223,9 @@ export function DashboardScreen() {
   const data = dashboardData;
   const riskStyle = getRiskStyle(data?.risk_level || "inconclusive");
   const hasData = !!data;
+  const showSummaryCards = !!data?.has_clinical_summary;
+  const showBiomarkerBreakdown = !!data && data.explanation.length > 0;
+  const showResearchRefs = !!data && data.research_references_used.length > 0;
 
   const dashboardTranscript = useMemo(() => {
     if (!data) {
@@ -186,11 +233,11 @@ export function DashboardScreen() {
     }
     return [
       `Assessment dashboard for ${data.patient_name}.`,
-      `Risk level is ${riskStyle.label.toLowerCase()}.`,
+      showSummaryCards ? `Risk level is ${riskStyle.label.toLowerCase()}.` : "",
       data.conditions_flagged.length
         ? `Conditions flagged: ${data.conditions_flagged.map((c) => c.replace(/_/g, " ")).join(", ")}.`
         : "",
-      `Confidence score is ${(data.confidence_score * 100).toFixed(0)} percent.`,
+      showSummaryCards ? `Confidence score is ${(data.confidence_score * 100).toFixed(0)} percent.` : "",
       `${data.total_tests_done} tests completed. Last assessment ${new Date(data.last_assessment_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}.`,
     ]
       .filter(Boolean)
@@ -330,6 +377,7 @@ export function DashboardScreen() {
         </div>
 
         {/* Risk level + conditions + confidence */}
+        {showSummaryCards && (
         <div className="grid md:grid-cols-3 gap-4">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -398,8 +446,10 @@ export function DashboardScreen() {
             </Card>
           </motion.div>
         </div>
+        )}
 
         {/* Biomarker explanations */}
+        {showBiomarkerBreakdown && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -437,8 +487,10 @@ export function DashboardScreen() {
             </ScrollArea>
           </Card>
         </motion.div>
+        )}
 
         {/* Research references */}
+        {showResearchRefs && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -461,6 +513,7 @@ export function DashboardScreen() {
             </ul>
           </Card>
         </motion.div>
+        )}
           </>
         )}
       </div>
