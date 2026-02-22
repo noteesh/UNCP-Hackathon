@@ -72,6 +72,7 @@ export function EyeTestScreen() {
   const [searchParams] = useSearchParams();
   const { getCurrentPatientId } = useAuth();
   const mode = searchParams.get("mode") === "postop" ? "postop" : "baseline";
+  const isDemo = searchParams.get("demo") === "1";
   const videoRef = useRef<HTMLVideoElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null); // small camera preview
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -696,6 +697,57 @@ export function EyeTestScreen() {
     setResultHeaderText(isDepressed ? "ABNORMAL" : "NORMAL");
     setStatusText(`Test complete: ${isDepressed ? "ABNORMAL" : "NORMAL"}`);
 
+    // --- Demo mode: override metrics and skip Gemini API ---
+    if (isDemo) {
+      const demoMetrics = {
+        timestamp: new Date().toISOString(),
+        saccade_velocity: 0.3412,
+        fixation_stability: 0.912,
+        pupil_variability: 0.018,
+        smooth_pursuit_gain: 0.874,
+        saccade_accuracy: 0.891,
+        prosaccade_latency: 198.4,
+      };
+      try { await persistEyeMetricsToMongo(demoMetrics); } catch {}
+
+      // Override displayed metric values to match demo data
+      setFinalSaccadeAvg("0.34");
+      setFixationStability(0.912);
+      setPupilVariability(0.018);
+      setSmoothPursuitGain(0.874);
+      setSaccadeAccuracy(0.891);
+      setProsaccadeLatency(198.4);
+      setResultNormal(true);
+      setResultPillText("CNS STATUS: STABLE");
+      setResultHeaderText("NORMAL");
+      setStatusText("Test complete: NORMAL");
+
+      const demoSummary: GeminiSummary = {
+        risk_level: "low",
+        conditions_flagged: [],
+        confidence_score: 0.82,
+        explanation: [
+          "saccade_velocity:0.35:0.3412:Saccade velocity remains within normal range with minimal deviation from baseline.",
+          "fixation_stability:0.92:0.912:Fixation stability shows strong gaze-holding ability consistent with healthy ocular motor function.",
+          "pupil_variability:0.015:0.018:Pupil variability within expected physiological range indicating stable autonomic response.",
+          "smooth_pursuit_gain:0.88:0.874:Smooth pursuit gain near unity indicates intact cerebellar and brainstem pathways.",
+        ],
+        research_references_used: [],
+      };
+      setGeminiSummary(demoSummary);
+      setGeminiError(null);
+      setIsGeminiLoading(false);
+      // Persist to localStorage so results screen picks it up
+      const patientId = await getCurrentPatientId();
+      if (patientId) {
+        const { saveLatestGeminiSummary } = await import("../lib/gemini-analysis");
+        saveLatestGeminiSummary(patientId, demoSummary);
+      }
+      setShowResultsModal(true);
+      setExamBtnDisabled(false);
+      return;
+    }
+
     try {
       await persistEyeMetricsToMongo({
         timestamp: new Date().toISOString(),
@@ -715,7 +767,7 @@ export function EyeTestScreen() {
     setShowResultsModal(true);
     setExamBtnDisabled(false);
     void generateGeminiSummary();
-  }, [threshold, persistEyeMetricsToMongo, generateGeminiSummary]);
+  }, [threshold, persistEyeMetricsToMongo, generateGeminiSummary, isDemo, getCurrentPatientId]);
 
   const handleDismissResults = () => {
     setShowResultsModal(false);

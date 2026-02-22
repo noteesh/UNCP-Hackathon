@@ -9,6 +9,7 @@ export function InstructionsScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") === "postop" ? "postop" : "baseline";
+  const isDemo = searchParams.get("demo") === "1";
   const transcript = `Step 1: Follow the dot. Please sit comfortably and keep your head still. A blue dot will flash from side to side—follow it with your eyes only. Then it will move smoothly left and right. Follow the dot with your eyes only, not your head. When you're ready, press Begin Test.`;
 
   return (
@@ -83,7 +84,7 @@ export function InstructionsScreen() {
             Back
           </Button>
           <Button
-            onClick={() => navigate(`/eye-test?mode=${mode}`)}
+            onClick={() => navigate(`/eye-test?mode=${mode}${isDemo ? "&demo=1" : ""}`)}
             className="flex-1 h-12 bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] hover:opacity-90 text-white text-sm font-semibold rounded-xl shadow-lg shadow-[#00d4ff]/20"
           >
             Begin Test

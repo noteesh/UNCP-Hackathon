@@ -29,7 +29,10 @@ export function PostOpScreen() {
             pre-op baseline.
           </p>
           <Button
-            onClick={() => navigate("/instructions?mode=postop")}
+            onClick={(e: React.MouseEvent) => {
+              const params = e.shiftKey ? "mode=postop&demo=1" : "mode=postop";
+              navigate(`/instructions?${params}`);
+            }}
             className="w-full h-12 bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] hover:opacity-90 text-white font-semibold rounded-xl"
           >
             Start post-op test

@@ -297,7 +297,10 @@ export function DashboardScreen() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              onClick={() => navigate("/instructions")}
+              onClick={(e: React.MouseEvent) => {
+                const params = e.shiftKey ? "demo=1" : "";
+                navigate(`/instructions${params ? `?${params}` : ""}`);
+              }}
               className="bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] hover:opacity-90 text-white"
             >
               <Play className="mr-2 h-4 w-4" />
